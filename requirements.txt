@@ -1,0 +1,22 @@
+# AWS SDK and Lambda dependencies
+boto3>=1.34.0
+botocore>=1.34.0
+
+# HTTP client for Quip API
+requests>=2.31.0
+
+# Lambda utilities and logging
+aws-lambda-powertools>=2.25.0
+
+# Type hints and validation
+typing-extensions>=4.8.0
+
+# CDK dependencies (for infrastructure)
+aws-cdk-lib>=2.100.0
+constructs>=10.3.0
+
+# Development and testing dependencies
+pytest>=7.4.0
+pytest-mock>=3.12.0
+moto>=4.2.0  # AWS service mocking for tests
+responses>=0.24.0  # HTTP request mocking

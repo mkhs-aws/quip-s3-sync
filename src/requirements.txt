@@ -1,0 +1,5 @@
+# Lambda runtime dependencies
+boto3>=1.34.0
+requests>=2.31.0
+aws-lambda-powertools>=2.25.0
+typing-extensions>=4.8.0

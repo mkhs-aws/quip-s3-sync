@@ -1,0 +1,57 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Quip-S3 Sync: Local Runner",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/local_runner.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                // Quip Configuration (Required - Replace with your actual values)
+                "QUIP_ACCESS_TOKEN": "T0pLOU1BR0ZaZmg=|1793423644|Vbx5FmOFzvD+EMhSma78PsCRmBGY3JK9/rU4N9oMhEQ=",
+                "QUIP_FOLDER_IDS": "UPAPOIycjg0i",
+                // AWS Configuration (Optional - Update with your values)
+                "AWS_REGION": "us-east-1",
+                "S3_BUCKET_NAME": "264148669776-quip-sync",
+                "SECRET_NAME": "quip-sync-credentials",
+                // Logging Configuration
+                "LOG_LEVEL": "DEBUG"
+            }
+        },
+        {
+            "name": "Quip-S3 Sync: With .env file",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/run_local.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                // This configuration loads from .env file
+                // Copy .env.example to .env and fill in your values
+                "LOG_LEVEL": "DEBUG"
+            }
+        },
+        {
+            "name": "Quip-S3 Sync: Lambda Function Direct",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/lambda_function.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                // Direct lambda function execution (requires __main__ block)
+                "QUIP_ACCESS_TOKEN": "Bearer_your_quip_token_here",
+                "QUIP_FOLDER_IDS": "folder1_id,folder2_id,folder3_id",
+                "AWS_REGION": "us-east-1",
+                "S3_BUCKET_NAME": "264148669776-quip-sync",
+                "SECRET_NAME": "quip-sync-credentials",
+                "LOG_LEVEL": "DEBUG"
+            }
+        }
+    ]
+}
