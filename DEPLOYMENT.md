@@ -102,11 +102,13 @@ npm install -g aws-cdk
 # 2. Bootstrap CDK (first time only)
 cdk bootstrap
 
-# 3. Deploy with your Quick Suite parameters
-cdk deploy \
-  --parameters quicksightPrincipalId="YOUR_PRINCIPAL_ID" \
-  --parameters quicksightNamespace="default" \
-  --parameters serviceRoleArn="YOUR_SERVICE_ROLE_ARN"
+# 3. Deploy with your custom name and Quick Suite parameters
+# Stack name will be automatically generated as QuipSyncStack-<custom-name>
+cdk deploy QuipSyncStack-my-quip-sync \
+  --context customName="my-quip-sync" \
+  --context quicksightPrincipalId="YOUR_PRINCIPAL_ID" \
+  --context quicksightNamespace="default" \
+  --context serviceRoleArn="YOUR_SERVICE_ROLE_ARN"
 
 # 4. Configure Secrets Manager
 aws secretsmanager create-secret \
@@ -121,10 +123,12 @@ aws secretsmanager create-secret \
 This method passes parameters directly to the CDK deploy command:
 
 ```bash
-cdk deploy \
-  --parameters quicksightPrincipalId="user/d-12345abcde/S-1-2-34-1234567890-1234567890-1234567890-1234567890" \
-  --parameters quicksightNamespace="default" \
-  --parameters serviceRoleArn="arn:aws:iam::123456789012:role/service-role/aws-quicksight-service-role-v0"
+# Stack name will be automatically generated as QuipSyncStack-<custom-name>
+cdk deploy QuipSyncStack-my-quip-sync \
+  --context customName="my-quip-sync" \
+  --context quicksightPrincipalId="user/d-12345abcde/S-1-2-34-1234567890-1234567890-1234567890-1234567890" \
+  --context quicksightNamespace="default" \
+  --context serviceRoleArn="arn:aws:iam::123456789012:role/service-role/aws-quicksight-service-role-v0"
 ```
 
 **Advantages**:
@@ -140,6 +144,7 @@ Add parameters to `cdk.json` context section:
 {
   "app": "python app.py",
   "context": {
+    "customName": "my-quip-sync",
     "quicksightPrincipalId": "user/d-12345abcde/S-1-2-34-1234567890-1234567890-1234567890-1234567890",
     "quicksightNamespace": "default",
     "serviceRoleArn": "arn:aws:iam::123456789012:role/service-role/aws-quicksight-service-role-v0",
@@ -148,9 +153,9 @@ Add parameters to `cdk.json` context section:
 }
 ```
 
-Then deploy:
+Then deploy (stack name will be automatically generated as QuipSyncStack-<custom-name>):
 ```bash
-cdk deploy
+cdk deploy QuipSyncStack-my-quip-sync
 ```
 
 **Advantages**:
@@ -163,11 +168,13 @@ cdk deploy
 Set environment variables before deployment:
 
 ```bash
+export CDK_CUSTOM_NAME="my-quip-sync"
 export CDK_QUICKSIGHT_PRINCIPAL_ID="user/d-12345abcde/S-1-2-34-1234567890-1234567890-1234567890-1234567890"
 export CDK_QUICKSIGHT_NAMESPACE="default"
 export CDK_SERVICE_ROLE_ARN="arn:aws:iam::123456789012:role/service-role/aws-quicksight-service-role-v0"
 
-cdk deploy
+# Stack name will be automatically generated as QuipSyncStack-<custom-name>
+cdk deploy QuipSyncStack-my-quip-sync
 ```
 
 **Note**: This method requires modifying `app.py` to read from environment variables.
@@ -216,20 +223,22 @@ The ARN of the QuickSight service role that will access the S3 bucket.
 
 ```bash
 # Deploy to development with dev-specific parameters
-cdk deploy QuipSyncStack-Dev \
-  --parameters quicksightPrincipalId="user/d-dev123/S-1-5-21-dev-principal" \
-  --parameters quicksightNamespace="dev" \
-  --parameters serviceRoleArn="arn:aws:iam::123456789012:role/service-role/aws-quicksight-service-role-dev"
+cdk deploy QuipSyncStack-dev \
+  --context customName="dev" \
+  --context quicksightPrincipalId="user/d-dev123/S-1-5-21-dev-principal" \
+  --context quicksightNamespace="dev" \
+  --context serviceRoleArn="arn:aws:iam::123456789012:role/service-role/aws-quicksight-service-role-dev"
 ```
 
 ### Production Environment
 
 ```bash
 # Deploy to production with prod-specific parameters
-cdk deploy QuipSyncStack-Prod \
-  --parameters quicksightPrincipalId="user/d-prod456/S-1-5-21-prod-principal" \
-  --parameters quicksightNamespace="default" \
-  --parameters serviceRoleArn="arn:aws:iam::987654321098:role/service-role/aws-quicksight-service-role-v0"
+cdk deploy QuipSyncStack-prod \
+  --context customName="prod" \
+  --context quicksightPrincipalId="user/d-prod456/S-1-5-21-prod-principal" \
+  --context quicksightNamespace="default" \
+  --context serviceRoleArn="arn:aws:iam::987654321098:role/service-role/aws-quicksight-service-role-v0"
 ```
 
 ## Secrets Manager Configuration
@@ -299,22 +308,28 @@ aws secretsmanager create-secret \
 ### 1. Verify Stack Deployment
 
 ```bash
-# Check if stack was deployed successfully
-aws cloudformation describe-stacks --stack-name QuipSyncStack
+# Check if stack was deployed successfully (replace CUSTOM-NAME with your actual custom name)
+aws cloudformation describe-stacks --stack-name QuipSyncStack-CUSTOM-NAME
+
+# Example:
+aws cloudformation describe-stacks --stack-name QuipSyncStack-my-quip-sync
 
 # List stack resources
-aws cloudformation list-stack-resources --stack-name QuipSyncStack
+aws cloudformation list-stack-resources --stack-name QuipSyncStack-my-quip-sync
 ```
 
 ### 2. Verify Lambda Function
 
 ```bash
-# Check Lambda function configuration
-aws lambda get-function --function-name QuipSyncStack-QuipSyncFunction
+# Check Lambda function configuration (replace CUSTOM-NAME with your actual custom name)
+aws lambda get-function --function-name quip-sync-CUSTOM-NAME-function
+
+# Example:
+aws lambda get-function --function-name quip-sync-my-quip-sync-function
 
 # Test Lambda function
 aws lambda invoke \
-  --function-name QuipSyncStack-QuipSyncFunction \
+  --function-name quip-sync-my-quip-sync-function \
   --payload '{}' \
   response.json && cat response.json
 ```
@@ -322,31 +337,43 @@ aws lambda invoke \
 ### 3. Verify S3 Bucket
 
 ```bash
-# Check if S3 bucket exists
-aws s3 ls | grep quip-sync
+# Check if S3 bucket exists (replace CUSTOM-NAME with your actual custom name)
+aws s3 ls | grep quip-sync-CUSTOM-NAME
+
+# Example:
+aws s3 ls | grep quip-sync-my-quip-sync
 
 # Check bucket policy (will only exist if QuickSight parameters were provided during deployment)
-aws s3api get-bucket-policy --bucket YOUR-ACCOUNT-ID-quip-sync
+aws s3api get-bucket-policy --bucket YOUR-ACCOUNT-ID-quip-sync-CUSTOM-NAME
+
+# Example:
+aws s3api get-bucket-policy --bucket 123456789012-quip-sync-my-quip-sync
 ```
 
 ### 4. Verify EventBridge Rule
 
 ```bash
-# Check EventBridge rule
-aws events describe-rule --name QuipSyncStack-QuipSyncSchedule
+# Check EventBridge rule (replace CUSTOM-NAME with your actual custom name)
+aws events describe-rule --name quip-sync-CUSTOM-NAME-daily-schedule
+
+# Example:
+aws events describe-rule --name quip-sync-my-quip-sync-daily-schedule
 
 # List rule targets
-aws events list-targets-by-rule --rule QuipSyncStack-QuipSyncSchedule
+aws events list-targets-by-rule --rule quip-sync-my-quip-sync-daily-schedule
 ```
 
 ### 5. Verify Secrets Manager
 
 ```bash
-# Check if secret exists
-aws secretsmanager describe-secret --secret-id quip-sync-credentials
+# Check if secret exists (replace CUSTOM-NAME with your actual custom name)
+aws secretsmanager describe-secret --secret-id quip-sync-CUSTOM-NAME-credentials
+
+# Example:
+aws secretsmanager describe-secret --secret-id quip-sync-my-quip-sync-credentials
 
 # Test secret retrieval (be careful in production)
-aws secretsmanager get-secret-value --secret-id quip-sync-credentials
+aws secretsmanager get-secret-value --secret-id quip-sync-my-quip-sync-credentials
 ```
 
 ## Rollback Procedures
@@ -354,21 +381,27 @@ aws secretsmanager get-secret-value --secret-id quip-sync-credentials
 ### Complete Stack Rollback
 
 ```bash
-# Delete the entire stack
-cdk destroy
+# Delete the entire stack (replace CUSTOM-NAME with your actual custom name)
+cdk destroy QuipSyncStack-CUSTOM-NAME
+
+# Example:
+cdk destroy QuipSyncStack-my-quip-sync
 
 # Confirm deletion
-aws cloudformation describe-stacks --stack-name QuipSyncStack
+aws cloudformation describe-stacks --stack-name QuipSyncStack-my-quip-sync
 ```
 
 ### Partial Rollback
 
 ```bash
-# Disable EventBridge rule (stops automatic execution)
-aws events disable-rule --name QuipSyncStack-QuipSyncSchedule
+# Disable EventBridge rule (stops automatic execution) - replace CUSTOM-NAME with your actual custom name
+aws events disable-rule --name quip-sync-CUSTOM-NAME-daily-schedule
+
+# Example:
+aws events disable-rule --name quip-sync-my-quip-sync-daily-schedule
 
 # Delete specific resources if needed
-aws lambda delete-function --function-name QuipSyncStack-QuipSyncFunction
+aws lambda delete-function --function-name quip-sync-my-quip-sync-function
 ```
 
 ## Monitoring Setup
@@ -386,9 +419,9 @@ cat > dashboard.json << 'EOF'
       "type": "metric",
       "properties": {
         "metrics": [
-          ["AWS/Lambda", "Duration", "FunctionName", "QuipSyncStack-QuipSyncFunction"],
-          ["AWS/Lambda", "Errors", "FunctionName", "QuipSyncStack-QuipSyncFunction"],
-          ["AWS/Lambda", "Invocations", "FunctionName", "QuipSyncStack-QuipSyncFunction"]
+          ["AWS/Lambda", "Duration", "FunctionName", "quip-sync-CUSTOM-NAME-function"],
+          ["AWS/Lambda", "Errors", "FunctionName", "quip-sync-CUSTOM-NAME-function"],
+          ["AWS/Lambda", "Invocations", "FunctionName", "quip-sync-CUSTOM-NAME-function"]
         ],
         "period": 300,
         "stat": "Average",
@@ -409,9 +442,9 @@ aws cloudwatch put-dashboard \
 ### Custom Alarms
 
 ```bash
-# Create alarm for Lambda errors
+# Create alarm for Lambda errors (replace CUSTOM-NAME with your actual custom name)
 aws cloudwatch put-metric-alarm \
-  --alarm-name "QuipSync-LambdaErrors" \
+  --alarm-name "QuipSync-CUSTOM-NAME-LambdaErrors" \
   --alarm-description "Alert when Lambda function has errors" \
   --metric-name "Errors" \
   --namespace "AWS/Lambda" \
@@ -419,7 +452,20 @@ aws cloudwatch put-metric-alarm \
   --period 300 \
   --threshold 1 \
   --comparison-operator "GreaterThanOrEqualToThreshold" \
-  --dimensions Name=FunctionName,Value=QuipSyncStack-QuipSyncFunction \
+  --dimensions Name=FunctionName,Value=quip-sync-CUSTOM-NAME-function \
+  --evaluation-periods 1
+
+# Example:
+aws cloudwatch put-metric-alarm \
+  --alarm-name "QuipSync-my-quip-sync-LambdaErrors" \
+  --alarm-description "Alert when Lambda function has errors" \
+  --metric-name "Errors" \
+  --namespace "AWS/Lambda" \
+  --statistic "Sum" \
+  --period 300 \
+  --threshold 1 \
+  --comparison-operator "GreaterThanOrEqualToThreshold" \
+  --dimensions Name=FunctionName,Value=quip-sync-my-quip-sync-function \
   --evaluation-periods 1
 ```
 

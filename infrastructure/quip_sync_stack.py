@@ -3,6 +3,7 @@ CDK stack for Quip-to-S3 synchronization system
 """
 
 from typing import Optional, Dict
+import re
 from aws_cdk import (
     Stack,
     Duration,
@@ -34,6 +35,7 @@ class QuipSyncStack(Stack):
         self,
         scope: Construct,
         construct_id: str,
+        custom_name: str,
         quicksight_principal_id: Optional[str] = None,
         quicksight_namespace: str = "default",
         service_role_arn: Optional[str] = None,
@@ -45,12 +47,16 @@ class QuipSyncStack(Stack):
         Args:
             scope: CDK scope
             construct_id: Stack identifier
+            custom_name: Custom name for resource naming (will be validated)
             quicksight_principal_id: QuickSight principal ID for S3 access
             quicksight_namespace: QuickSight namespace
             service_role_arn: QuickSight service role ARN
             **kwargs: Additional stack arguments
         """
         super().__init__(scope, construct_id, **kwargs)
+        
+        # Validate custom_name follows AWS naming conventions
+        self.custom_name = self._validate_custom_name(custom_name)
         
         # Create CDK parameters for configurable Quick Suite access
         self.quicksight_principal_param = CfnParameter(
@@ -88,6 +94,68 @@ class QuipSyncStack(Stack):
         
         # Create CloudWatch alarms for monitoring
         self.alarms = self._create_cloudwatch_alarms()
+    
+    def _validate_custom_name(self, custom_name: str) -> str:
+        """
+        Validate custom_name follows AWS naming conventions for both S3 and Secrets Manager
+        
+        Args:
+            custom_name: The custom name to validate
+            
+        Returns:
+            str: The validated custom name
+            
+        Raises:
+            ValueError: If custom_name doesn't meet AWS naming requirements
+        """
+        if not custom_name:
+            raise ValueError("custom_name cannot be empty")
+        
+        # S3 bucket naming rules (most restrictive):
+        # - 3-63 characters long
+        # - Only lowercase letters, numbers, and hyphens
+        # - Must start and end with letter or number
+        # - Cannot contain consecutive hyphens
+        # - Cannot be formatted as IP address
+        
+        # Secrets Manager naming rules:
+        # - 1-512 characters
+        # - Letters, numbers, and special characters /_+=.@-
+        # - Cannot start or end with hyphen
+        
+        # Apply the most restrictive rules (S3 bucket rules)
+        # Account for bucket name format: <account-id>-quip-sync-<custom-name>
+        # AWS account ID is 12 digits, "quip-sync" is 9 chars, hyphens are 2 chars
+        # So we need: 12 + 1 + 9 + 1 + custom_name <= 63
+        # Therefore: custom_name <= 63 - 23 = 40 characters
+        max_custom_name_length = 63 - 12 - 1 - 9 - 1  # 40 characters
+        
+        if len(custom_name) < 3 or len(custom_name) > max_custom_name_length:
+            raise ValueError(f"custom_name must be between 3 and {max_custom_name_length} characters long")
+        
+        # Check for valid characters (lowercase letters, numbers, hyphens only)
+        if not re.match(r'^[a-z0-9-]+$', custom_name):
+            raise ValueError("custom_name can only contain lowercase letters, numbers, and hyphens")
+        
+        # Must start and end with letter or number
+        if not re.match(r'^[a-z0-9].*[a-z0-9]$', custom_name):
+            raise ValueError("custom_name must start and end with a letter or number")
+        
+        # Cannot contain consecutive hyphens
+        if '--' in custom_name:
+            raise ValueError("custom_name cannot contain consecutive hyphens")
+        
+        # Cannot be formatted as IP address (basic check)
+        ip_pattern = r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$'
+        if re.match(ip_pattern, custom_name.replace('-', '.')):
+            raise ValueError("custom_name cannot be formatted as an IP address")
+        
+        # Additional AWS reserved names check
+        reserved_names = ['aws', 'amazon', 'amzn']
+        if any(reserved in custom_name.lower() for reserved in reserved_names):
+            raise ValueError("custom_name cannot contain AWS reserved words (aws, amazon, amzn)")
+        
+        return custom_name
         
     def _create_s3_bucket(self) -> s3.Bucket:
         """
@@ -96,7 +164,7 @@ class QuipSyncStack(Stack):
         Returns:
             s3.Bucket: The created S3 bucket
         """
-        bucket_name = f"{self.account}-quip-sync"
+        bucket_name = f"{self.account}-quip-sync-{self.custom_name}"
         
         bucket = s3.Bucket(
             self, "QuipSyncBucket",
@@ -184,10 +252,12 @@ class QuipSyncStack(Stack):
         Returns:
             secretsmanager.Secret: The created secret
         """
+        secret_name = f"quip-sync-{self.custom_name}-credentials"
+        
         secret = secretsmanager.Secret(
             self, "QuipCredentials",
-            secret_name="quip-sync-credentials",
-            description="Quip access token and folder IDs for synchronization",
+            secret_name=secret_name,
+            description=f"Quip access token and folder IDs for synchronization ({self.custom_name})",
             generate_secret_string=secretsmanager.SecretStringGenerator(
                 secret_string_template='{"quip_access_token": "", "folder_ids": ""}',
                 generate_string_key="placeholder",
@@ -217,8 +287,8 @@ class QuipSyncStack(Stack):
         # 4. Using separate policy documents for different service permissions for better auditability
         lambda_role = iam.Role(
             self, "QuipSyncLambdaRole",
-            role_name="quip-sync-lambda-execution-role",
-            description="Execution role for Quip-S3 synchronization Lambda function",
+            role_name=f"quip-sync-{self.custom_name}-lambda-execution-role",
+            description=f"Execution role for Quip-S3 synchronization Lambda function ({self.custom_name})",
             assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
             inline_policies={
                 "QuipSyncSecretsManagerPolicy": iam.PolicyDocument(
@@ -271,8 +341,8 @@ class QuipSyncStack(Stack):
                                 "logs:DescribeLogStreams"
                             ],
                             resources=[
-                                f"arn:aws:logs:{self.region}:{self.account}:log-group:/aws/lambda/quip-sync-function",
-                                f"arn:aws:logs:{self.region}:{self.account}:log-group:/aws/lambda/quip-sync-function:*"
+                                f"arn:aws:logs:{self.region}:{self.account}:log-group:/aws/lambda/quip-sync-{self.custom_name}-function",
+                                f"arn:aws:logs:{self.region}:{self.account}:log-group:/aws/lambda/quip-sync-{self.custom_name}-function:*"
                             ]
                         )
                     ]
@@ -283,14 +353,14 @@ class QuipSyncStack(Stack):
         # Create CloudWatch log group
         log_group = logs.LogGroup(
             self, "QuipSyncLogGroup",
-            log_group_name="/aws/lambda/quip-sync-function",
+            log_group_name=f"/aws/lambda/quip-sync-{self.custom_name}-function",
             retention=logs.RetentionDays.ONE_MONTH
         )
         
         # Create Lambda function
         lambda_function = _lambda.Function(
             self, "QuipSyncFunction",
-            function_name="quip-sync-function",
+            function_name=f"quip-sync-{self.custom_name}-function",
             runtime=_lambda.Runtime.PYTHON_3_13,
             handler="lambda_function.lambda_handler",
             code=_lambda.Code.from_asset(
@@ -336,8 +406,8 @@ class QuipSyncStack(Stack):
         # Note: This doesn't account for daylight saving time transitions
         event_rule = events.Rule(
             self, "QuipSyncSchedule",
-            rule_name="quip-sync-daily-schedule",
-            description="Daily trigger for Quip-S3 synchronization at midnight Sydney time",
+            rule_name=f"quip-sync-{self.custom_name}-daily-schedule",
+            description=f"Daily trigger for Quip-S3 synchronization at midnight Sydney time ({self.custom_name})",
             schedule=events.Schedule.cron(
                 minute="0",
                 hour="14",  # 2 PM UTC = midnight Sydney time (UTC+10)
@@ -378,15 +448,15 @@ class QuipSyncStack(Stack):
         # Create SNS topic for alarm notifications (optional)
         alarm_topic = sns.Topic(
             self, "QuipSyncAlarmTopic",
-            topic_name="quip-sync-alarms",
-            display_name="Quip S3 Sync Alarms"
+            topic_name=f"quip-sync-{self.custom_name}-alarms",
+            display_name=f"Quip S3 Sync Alarms ({self.custom_name})"
         )
         
         # Lambda function error alarm
         alarms['lambda_errors'] = cloudwatch.Alarm(
             self, "QuipSyncLambdaErrorAlarm",
-            alarm_name="quip-sync-lambda-errors",
-            alarm_description="Alert when Quip S3 sync Lambda function encounters errors",
+            alarm_name=f"quip-sync-{self.custom_name}-lambda-errors",
+            alarm_description=f"Alert when Quip S3 sync Lambda function encounters errors ({self.custom_name})",
             metric=self.lambda_function.metric_errors(
                 period=Duration.minutes(5),
                 statistic="Sum"
@@ -400,8 +470,8 @@ class QuipSyncStack(Stack):
         # Lambda function timeout alarm
         alarms['lambda_duration'] = cloudwatch.Alarm(
             self, "QuipSyncLambdaDurationAlarm",
-            alarm_name="quip-sync-lambda-duration",
-            alarm_description="Alert when Quip S3 sync Lambda function approaches timeout",
+            alarm_name=f"quip-sync-{self.custom_name}-lambda-duration",
+            alarm_description=f"Alert when Quip S3 sync Lambda function approaches timeout ({self.custom_name})",
             metric=self.lambda_function.metric_duration(
                 period=Duration.minutes(5),
                 statistic="Maximum"
@@ -415,8 +485,8 @@ class QuipSyncStack(Stack):
         # Lambda function throttle alarm
         alarms['lambda_throttles'] = cloudwatch.Alarm(
             self, "QuipSyncLambdaThrottleAlarm",
-            alarm_name="quip-sync-lambda-throttles",
-            alarm_description="Alert when Quip S3 sync Lambda function is throttled",
+            alarm_name=f"quip-sync-{self.custom_name}-lambda-throttles",
+            alarm_description=f"Alert when Quip S3 sync Lambda function is throttled ({self.custom_name})",
             metric=self.lambda_function.metric_throttles(
                 period=Duration.minutes(5),
                 statistic="Sum"
@@ -432,8 +502,8 @@ class QuipSyncStack(Stack):
         # Quip API error rate alarm
         alarms['quip_api_errors'] = cloudwatch.Alarm(
             self, "QuipSyncQuipAPIErrorAlarm",
-            alarm_name="quip-sync-quip-api-errors",
-            alarm_description="Alert when Quip API error rate is high",
+            alarm_name=f"quip-sync-{self.custom_name}-quip-api-errors",
+            alarm_description=f"Alert when Quip API error rate is high ({self.custom_name})",
             metric=cloudwatch.Metric(
                 namespace="AWS/Lambda",
                 metric_name="QuipAPIErrors",
@@ -452,8 +522,8 @@ class QuipSyncStack(Stack):
         # S3 upload failure alarm
         alarms['s3_upload_errors'] = cloudwatch.Alarm(
             self, "QuipSyncS3UploadErrorAlarm",
-            alarm_name="quip-sync-s3-upload-errors",
-            alarm_description="Alert when S3 upload error rate is high",
+            alarm_name=f"quip-sync-{self.custom_name}-s3-upload-errors",
+            alarm_description=f"Alert when S3 upload error rate is high ({self.custom_name})",
             metric=cloudwatch.Metric(
                 namespace="AWS/Lambda",
                 metric_name="S3UploadErrors",
@@ -472,8 +542,8 @@ class QuipSyncStack(Stack):
         # Sync success rate alarm (alert if success rate drops below 90%)
         alarms['sync_success_rate'] = cloudwatch.Alarm(
             self, "QuipSyncSuccessRateAlarm",
-            alarm_name="quip-sync-success-rate-low",
-            alarm_description="Alert when sync success rate drops below 90%",
+            alarm_name=f"quip-sync-{self.custom_name}-success-rate-low",
+            alarm_description=f"Alert when sync success rate drops below 90% ({self.custom_name})",
             metric=cloudwatch.Metric(
                 namespace="AWS/Lambda",
                 metric_name="SyncSuccessRate",
@@ -492,8 +562,8 @@ class QuipSyncStack(Stack):
         # High API latency alarm
         alarms['high_api_latency'] = cloudwatch.Alarm(
             self, "QuipSyncHighAPILatencyAlarm",
-            alarm_name="quip-sync-high-api-latency",
-            alarm_description="Alert when average Quip API latency is high",
+            alarm_name=f"quip-sync-{self.custom_name}-high-api-latency",
+            alarm_description=f"Alert when average Quip API latency is high ({self.custom_name})",
             metric=cloudwatch.Metric(
                 namespace="AWS/Lambda",
                 metric_name="AvgQuipAPILatency",

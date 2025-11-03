@@ -8,6 +8,7 @@ It is a serverless application deployed into your Isengard account that automati
 
 - **Automated Daily Sync**: EventBridge triggers Lambda function at midnight Sydney time
 - **Change Detection**: Only syncs documents that have been modified since last sync
+- **Multiple Knowledge Bases**: Create different knowledge bases focused on different Quip folders
 - **Secure Credential Storage**: Quip access tokens stored in AWS Secrets Manager
 - **Quick Suite Integration**: S3 bucket configured for Quick Suite access via a bucket policy
 - **Comprehensive Logging**: CloudWatch logs with structured JSON logging
@@ -52,7 +53,7 @@ Building this application requires some back and forth between Quick Suite, Quip
 
 1. **Clone the repository**:
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/mkhs-aws/quip-s3-sync
    cd quip-s3-sync
    ```
 
@@ -75,7 +76,10 @@ We first need to start the process of creating an Amazon S3 integration in Quick
 3. Update the Integration name e.g. My Quip Documents
 4. Change the AWS Account from the default (Quick Instance Account) to "Other AWS Account"
 5. Enter the ID of the account where you want to deploy the application
-6. Enter the bucket name as "s3://[Account ID]-quip-sync" where <Account ID> is the ID of the account where you want to deploy the application e.g. "s3://123456789012-quip-sync"
+6. Enter the bucket name as "s3://[Account ID]-quip-sync-[custom-name]" where:
+   - `[Account ID]` is the ID of the account where you want to deploy the application
+   - `[custom-name]` is the custom name you will choose during deployment
+   - Example: "s3://123456789012-quip-sync-my-quip-sync"
 7. Click the Copy policy icon in order to copy the bucket policy to your clipboard
 8. Paste the bucket policy into a text editor to retrieve the IDs below
 
@@ -128,14 +132,41 @@ python deploy.py
 
 The deployment script will:
 1. Check prerequisites (AWS CLI, CDK)
-2. Prompt for the region you wish to deploy the application into e.g. us-east-1
-3. Prompt for the Quick Suite IDs for the S3 bucket policy
-4. Prompt for the Quip personal access token
-5. Prompt for the Quip folder/s as a comma separated list of folder IDs
-6. Deploy the CDK stack with bucket policy
-7. Configure AWS Secrets Manager
-8. Verify the deployment
-9. Run the Lambda function to do the initial document sync
+2. **Prompt for a custom name** for resource naming (used for all AWS resources)
+3. Prompt for the region you wish to deploy the application into e.g. us-east-1
+4. Prompt for the Quick Suite IDs for the S3 bucket policy
+5. Prompt for the Quip personal access token
+6. Prompt for the Quip folder/s as a comma separated list of folder IDs
+7. Deploy the CDK stack with bucket policy
+8. Configure AWS Secrets Manager
+9. Verify the deployment
+10. Run the Lambda function to do the initial document sync
+
+**Custom Name Requirements:**
+- Must be 3-40 characters long (to accommodate S3 bucket naming with account ID and "quip-sync" prefix)
+- Can only contain lowercase letters, numbers, and hyphens
+- Must start and end with a letter or number
+- Cannot contain consecutive hyphens
+- Cannot be formatted as an IP address
+- Cannot contain AWS reserved words (aws, amazon, amzn)
+
+**Examples of valid custom names:**
+- `accounts`
+- `partner-meetings`
+- `engineering-kb`
+- `sales-materials`
+
+**Resource Naming Convention:**
+All AWS resources will be named using the custom name:
+- CloudFormation Stack: `QuipSyncStack-<custom-name>`
+- S3 Bucket: `<account-id>-quip-sync-<custom-name>`
+- Secret: `quip-sync-<custom-name>-credentials`
+- Lambda Function: `quip-sync-<custom-name>-function`
+- IAM Role: `quip-sync-<custom-name>-lambda-execution-role`
+- EventBridge Rule: `quip-sync-<custom-name>-daily-schedule`
+- CloudWatch Alarms: `quip-sync-<custom-name>-*`
+- SNS Topic: `quip-sync-<custom-name>-alarms`
+- Log Group: `/aws/lambda/quip-sync-<custom-name>-function`
 
 ### 7. Complete Creation of the Amazon S3 Integration in Quick Suite
 
@@ -180,16 +211,21 @@ If you prefer manual deployment, see the [DEPLOYMENT.md](DEPLOYMENT.md) guide.
 
 ## Deployment
 
-### Method 1: Command Line Parameters
+### Method 1: Command Line Context Parameters
 
-Deploy with Quick Suite parameters as command line arguments:
+Deploy with custom name and Quick Suite parameters as context arguments:
 
 ```bash
-# Deploy with all parameters
-cdk deploy \
-  --parameters quicksightPrincipalId="user/d-12345abcde/S-1-2-34-1234567890-1234567890-1234567890-1234567890" \
-  --parameters quicksightNamespace="default" \
-  --parameters serviceRoleArn="arn:aws:iam::123456789012:role/service-role/aws-quicksight-service-role-v0"
+# Deploy with all parameters (custom name is required)
+# Stack name will be automatically generated as QuipSyncStack-<custom-name>
+cdk deploy QuipSyncStack-my-quip-sync \
+  --context customName="my-quip-sync" \
+  --context quicksightPrincipalId="user/d-12345abcde/S-1-2-34-1234567890-1234567890-1234567890-1234567890" \
+  --context quicksightNamespace="default" \
+  --context serviceRoleArn="arn:aws:iam::123456789012:role/service-role/aws-quicksight-service-role-v0"
+
+# Deploy with minimal parameters (only custom name required)
+cdk deploy QuipSyncStack-team-docs --context customName="team-docs"
 ```
 
 ### Method 2: CDK Context
@@ -199,6 +235,7 @@ Set parameters in `cdk.json` context and deploy:
 ```json
 {
   "context": {
+    "customName": "my-quip-sync",
     "quicksightPrincipalId": "user/d-12345abcde/S-1-2-34-1234567890-1234567890-1234567890-1234567890",
     "quicksightNamespace": "default",
     "serviceRoleArn": "arn:aws:iam::123456789012:role/service-role/aws-quicksight-service-role-v0"
@@ -206,21 +243,36 @@ Set parameters in `cdk.json` context and deploy:
 }
 ```
 
-Then deploy:
+Then deploy (stack name will be automatically generated as QuipSyncStack-<custom-name>):
 ```bash
-cdk deploy
+cdk deploy QuipSyncStack-my-quip-sync
 ```
 
-### Method 3: Environment Variables
+### Method 3: Interactive Deployment Script (Recommended)
 
-Set environment variables and deploy:
+Use the deployment script which prompts for all required parameters:
 
 ```bash
-export QUICKSIGHT_PRINCIPAL_ID="user/d-12345abcde/S-1-2-34-1234567890-1234567890-1234567890-1234567890"
-export QUICKSIGHT_NAMESPACE="default"
-export SERVICE_ROLE_ARN="arn:aws:iam::123456789012:role/service-role/aws-quicksight-service-role-v0"
+# Python script (cross-platform)
+python deploy.py
 
-cdk deploy
+# Bash script (Linux/macOS)
+./deploy.sh
+```
+
+The script will prompt for:
+- Custom name (required)
+- AWS region
+- QuickSight configuration
+- Quip credentials
+
+**Example deployment session:**
+```
+Custom name for resources: my-quip-sync
+AWS Region for deployment [us-east-1]: us-east-1
+QuickSight Principal ID: user/d-12345abcde/S-1-2-34-1234567890-1234567890-1234567890-1234567890
+QuickSight Namespace [default]: default
+QuickSight Service Role ARN: arn:aws:iam::123456789012:role/service-role/aws-quicksight-service-role-v0
 ```
 
 ## Post-Deployment Setup
@@ -231,8 +283,18 @@ After deployment, create the required secret:
 
 ```bash
 # Create the secret with your Quip credentials
+# Note: Replace CUSTOM-NAME with your actual custom name
 aws secretsmanager create-secret \
-  --name "quip-sync-credentials" \
+  --name "quip-sync-CUSTOM-NAME-credentials" \
+  --description "Quip access token and folder IDs for sync system" \
+  --secret-string '{
+    "quip_access_token": "YOUR_ACTUAL_TOKEN_HERE",
+    "folder_ids": "folder1_id,folder2_id,folder3_id"
+  }'
+
+# Example with actual values:
+aws secretsmanager create-secret \
+  --name "quip-sync-my-quip-sync-credentials" \
   --description "Quip access token and folder IDs for sync system" \
   --secret-string '{
     "quip_access_token": "YOUR_ACTUAL_TOKEN_HERE",
@@ -245,16 +307,22 @@ Or use the AWS Console:
 2. Create new secret
 3. Choose "Other type of secret"
 4. Add the key-value pairs as shown above
-5. Name the secret `quip-sync-credentials`
+5. Name the secret using format: `quip-sync-CUSTOM-NAME-credentials` (e.g., `quip-sync-my-quip-sync-credentials`)
 
 ### 2. Test the Deployment
 
 Test the Lambda function manually:
 
 ```bash
-# Invoke the Lambda function
+# Invoke the Lambda function (replace CUSTOM-NAME with your actual custom name)
 aws lambda invoke \
-  --function-name QuipSyncStack-QuipSyncFunction \
+  --function-name quip-sync-CUSTOM-NAME-function \
+  --payload '{}' \
+  response.json
+
+# Example with actual custom name:
+aws lambda invoke \
+  --function-name quip-sync-my-quip-sync-function \
   --payload '{}' \
   response.json
 
@@ -267,11 +335,14 @@ cat response.json
 Check CloudWatch logs for execution details:
 
 ```bash
-# View recent log events
-aws logs describe-log-groups --log-group-name-prefix "/aws/lambda/QuipSyncStack"
+# View recent log events (replace CUSTOM-NAME with your actual custom name)
+aws logs describe-log-groups --log-group-name-prefix "/aws/lambda/quip-sync-CUSTOM-NAME"
 
 # Tail logs in real-time during execution
-aws logs tail /aws/lambda/QuipSyncStack-QuipSyncFunction --follow
+aws logs tail /aws/lambda/quip-sync-CUSTOM-NAME-function --follow
+
+# Example with actual custom name:
+aws logs tail /aws/lambda/quip-sync-my-quip-sync-function --follow
 ```
 
 ## Configuration Examples
@@ -320,17 +391,29 @@ aws logs tail /aws/lambda/QuipSyncStack-QuipSyncFunction --follow
 ### Debugging Commands
 
 ```bash
-# Check Lambda function configuration
-aws lambda get-function --function-name QuipSyncStack-QuipSyncFunction
+# Check Lambda function configuration (replace CUSTOM-NAME with your actual custom name)
+aws lambda get-function --function-name quip-sync-CUSTOM-NAME-function
 
-# List S3 bucket contents
-aws s3 ls s3://YOUR-ACCOUNT-ID-quip-sync/
+# Example:
+aws lambda get-function --function-name quip-sync-my-quip-sync-function
+
+# List S3 bucket contents (replace with your actual account ID and custom name)
+aws s3 ls s3://YOUR-ACCOUNT-ID-quip-sync-YOUR-CUSTOM-NAME/
+
+# Example:
+aws s3 ls s3://123456789012-quip-sync-my-quip-sync/
 
 # Check secret value (be careful with this in production)
-aws secretsmanager get-secret-value --secret-id quip-sync-credentials
+aws secretsmanager get-secret-value --secret-id quip-sync-YOUR-CUSTOM-NAME-credentials
 
-# View CloudWatch alarms
-aws cloudwatch describe-alarms --alarm-names QuipSyncStack-LambdaErrorAlarm
+# Example:
+aws secretsmanager get-secret-value --secret-id quip-sync-my-quip-sync-credentials
+
+# View CloudWatch alarms (replace CUSTOM-NAME with your actual custom name)
+aws cloudwatch describe-alarms --alarm-names quip-sync-CUSTOM-NAME-lambda-errors
+
+# Example:
+aws cloudwatch describe-alarms --alarm-names quip-sync-my-quip-sync-lambda-errors
 ```
 
 ## Monitoring
@@ -421,7 +504,7 @@ For development and testing, you can run the Lambda function locally:
    
    # Optional: AWS configuration (uses defaults if not set)
    AWS_REGION=us-east-1
-   S3_BUCKET_NAME=your-account-id-quip-sync
+   S3_BUCKET_NAME=your-account-id-quip-sync-your-custom-name
    LOG_LEVEL=INFO
    ```
 
@@ -438,7 +521,7 @@ python run_local.py
 # Method 2: Using environment variables directly
 export QUIP_ACCESS_TOKEN="Bearer your_token_here"
 export QUIP_FOLDER_IDS="folder1,folder2,folder3"
-export S3_BUCKET_NAME="your-account-id-quip-sync"
+export S3_BUCKET_NAME="your-account-id-quip-sync-your-custom-name"
 python local_runner.py
 ```
 

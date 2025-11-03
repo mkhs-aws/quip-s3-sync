@@ -17,6 +17,7 @@ This document specifies the requirements for a Quip-to-S3 synchronization system
 - **Document_Thread**: A Quip thread that contains document content (not spreadsheet)
 - **HTML_Representation**: The HTML format of a Quip document retrieved via API
 - **Link_Value**: The unique link identifier returned by the Get Threads V2 API for each thread
+- **Secret_Name**: The configurable name of the AWS Secrets Manager secret containing Quip credentials
 
 ## Requirements
 
@@ -86,6 +87,19 @@ This document specifies the requirements for a Quip-to-S3 synchronization system
 3. THE Lambda_Function SHALL have appropriate IAM permissions to read from Secrets_Manager
 4. THE Quip_Sync_System SHALL handle authentication failures gracefully when the token is invalid or expired
 5. THE Quip_Sync_System SHALL not log or expose the access token or folder IDs in any system outputs
+
+### Requirement 11
+
+**User Story:** As a system administrator, I want to specify a custom name during deployment that will be used for the CloudFormation stack name, S3 bucket, and secret, so that I can deploy multiple knowledge bases with different names and maintain consistent naming across all resources.
+
+#### Acceptance Criteria
+
+1. THE CDK_Template SHALL prompt the user for a custom name during deployment
+2. THE CDK_Template SHALL create the CloudFormation stack name using the format `QuipSyncStack-<custom-name>`
+3. THE CDK_Template SHALL create the S3_Bucket name by combining the AWS account ID and the user-provided name in the format `<AWS-Account-ID>-<custom-name>`
+4. THE CDK_Template SHALL create the Secret_Name by combining the AWS account ID and the user-provided name in the format `<AWS-Account-ID>-<custom-name>`
+5. THE Lambda_Function SHALL receive both the S3_Bucket name and Secret_Name through environment variables
+6. THE CDK_Template SHALL validate that the user-provided name follows AWS naming conventions for both S3 and Secrets Manager
 
 ### Requirement 7
 

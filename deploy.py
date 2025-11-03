@@ -165,13 +165,89 @@ def bootstrap_cdk(region: str) -> None:
             sys.exit(1)
 
 
+def validate_custom_name(custom_name: str) -> str:
+    """
+    Validate custom_name follows AWS naming conventions for both S3 and Secrets Manager
+    
+    Args:
+        custom_name: The custom name to validate
+        
+    Returns:
+        str: The validated custom name
+        
+    Raises:
+        ValueError: If custom_name doesn't meet AWS naming requirements
+    """
+    import re
+    
+    if not custom_name:
+        raise ValueError("custom_name cannot be empty")
+    
+    # S3 bucket naming rules (most restrictive):
+    # - 3-63 characters long
+    # - Only lowercase letters, numbers, and hyphens
+    # - Must start and end with letter or number
+    # - Cannot contain consecutive hyphens
+    # - Cannot be formatted as IP address
+    
+    # Account for bucket name format: <account-id>-quip-sync-<custom-name>
+    # AWS account ID is 12 digits, "quip-sync" is 9 chars, hyphens are 2 chars
+    # So we need: 12 + 1 + 9 + 1 + custom_name <= 63
+    # Therefore: custom_name <= 63 - 23 = 40 characters
+    max_custom_name_length = 63 - 12 - 1 - 9 - 1  # 40 characters
+    
+    if len(custom_name) < 3 or len(custom_name) > max_custom_name_length:
+        raise ValueError(f"custom_name must be between 3 and {max_custom_name_length} characters long")
+    
+    # Check for valid characters (lowercase letters, numbers, hyphens only)
+    if not re.match(r'^[a-z0-9-]+$', custom_name):
+        raise ValueError("custom_name can only contain lowercase letters, numbers, and hyphens")
+    
+    # Must start and end with letter or number
+    if not re.match(r'^[a-z0-9].*[a-z0-9]$', custom_name):
+        raise ValueError("custom_name must start and end with a letter or number")
+    
+    # Cannot contain consecutive hyphens
+    if '--' in custom_name:
+        raise ValueError("custom_name cannot contain consecutive hyphens")
+    
+    # Cannot be formatted as IP address (basic check)
+    ip_pattern = r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$'
+    if re.match(ip_pattern, custom_name.replace('-', '.')):
+        raise ValueError("custom_name cannot be formatted as an IP address")
+    
+    # Additional AWS reserved names check
+    reserved_names = ['aws', 'amazon', 'amzn']
+    if any(reserved in custom_name.lower() for reserved in reserved_names):
+        raise ValueError("custom_name cannot contain AWS reserved words (aws, amazon, amzn)")
+    
+    return custom_name
+
+
 def collect_cdk_parameters(current_region: str) -> Dict[str, str]:
     """Collect CDK deployment parameters from user"""
     print_info("Collecting CDK deployment parameters...")
     print()
     
-    print_info("AWS Configuration:")
+    print_info("Deployment Configuration:")
     params = {}
+    
+    # Prompt for custom name with validation
+    while True:
+        custom_name = prompt_input(
+            "Knowledge base name e.g. accounts (lower case with hyphens only - will be used for all AWS resource names)",
+            required=True
+        )
+        try:
+            params['custom_name'] = validate_custom_name(custom_name)
+            print_success(f"Custom name '{custom_name}' is valid")
+            break
+        except ValueError as e:
+            print_error(f"Invalid custom name: {e}")
+            print_info("Please try again with a different name")
+    
+    print()
+    print_info("AWS Configuration:")
     params['aws_region'] = prompt_input(
         "AWS Region for deployment", 
         default=current_region
@@ -193,17 +269,19 @@ def collect_cdk_parameters(current_region: str) -> Dict[str, str]:
         required=True
     )
     
-    print()
-    print_info("Stack Configuration:")
-    params['stack_name'] = prompt_input("Stack Name", default="QuipSyncStack")
+    # Stack name is automatically generated from custom name
+    params['stack_name'] = f"QuipSyncStack-{params['custom_name']}"
     
     return params
 
 
-def collect_secrets() -> Dict[str, str]:
+def collect_secrets(custom_name: str) -> Dict[str, str]:
     """Collect secrets configuration from user"""
     print_info("Collecting Secrets Manager configuration...")
     print()
+    
+    # Generate secret name using the same format as CDK stack
+    secret_name = f"quip-sync-{custom_name}-credentials"
     
     secrets = {}
     secrets['quip_access_token'] = prompt_input(
@@ -214,10 +292,9 @@ def collect_secrets() -> Dict[str, str]:
         "Quip Folder IDs (comma-separated)", 
         required=True
     )
-    secrets['secret_name'] = prompt_input(
-        "Secret Name", 
-        default="quip-sync-credentials"
-    )
+    secrets['secret_name'] = secret_name
+    
+    print_info(f"Secret will be created/updated with name: {secret_name}")
     
     return secrets
 
@@ -231,19 +308,22 @@ def deploy_cdk(params: Dict[str, str]) -> None:
     if params['aws_region']:
         region_env = f"AWS_DEFAULT_REGION={params['aws_region']} "
     
-    # Build CDK parameters
-    cdk_params = []
+    # Build CDK context parameters
+    cdk_context = []
+    
+    # Add custom name (required)
+    cdk_context.append(f'--context customName="{params["custom_name"]}"')
     
     if params['quicksight_principal_id']:
-        cdk_params.append(f'--parameters quicksightPrincipalId="{params["quicksight_principal_id"]}"')
+        cdk_context.append(f'--context quicksightPrincipalId="{params["quicksight_principal_id"]}"')
     
     if params['quicksight_namespace']:
-        cdk_params.append(f'--parameters quicksightNamespace="{params["quicksight_namespace"]}"')
+        cdk_context.append(f'--context quicksightNamespace="{params["quicksight_namespace"]}"')
     
     if params['service_role_arn']:
-        cdk_params.append(f'--parameters serviceRoleArn="{params["service_role_arn"]}"')
+        cdk_context.append(f'--context serviceRoleArn="{params["service_role_arn"]}"')
     
-    cdk_params_str = ' '.join(cdk_params)
+    cdk_params_str = ' '.join(cdk_context)
     
     # Show what will be deployed
     print_info("Running CDK diff to show planned changes...")
@@ -305,7 +385,7 @@ def update_secrets(secrets: Dict[str, str], region: str) -> None:
         print_success("Secret created successfully!")
 
 
-def verify_deployment(stack_name: str, secret_name: str, aws_info: Dict[str, str], region: str, service_role_arn: str = "") -> None:
+def verify_deployment(stack_name: str, secret_name: str, aws_info: Dict[str, str], region: str, custom_name: str, service_role_arn: str = "") -> None:
     """Verify the deployment"""
     print_info("Verifying deployment...")
     
@@ -318,7 +398,7 @@ def verify_deployment(stack_name: str, secret_name: str, aws_info: Dict[str, str
         
         # Check if bucket policy exists (if QuickSight parameters were provided)
         if service_role_arn:
-            bucket_name = f"{aws_info['account_id']}-quip-sync"
+            bucket_name = f"{aws_info['account_id']}-quip-sync-{custom_name}"
             try:
                 run_command(f'aws s3api get-bucket-policy --bucket "{bucket_name}" {region_flag}')
                 print_success("S3 bucket policy applied successfully")
@@ -337,11 +417,11 @@ def verify_deployment(stack_name: str, secret_name: str, aws_info: Dict[str, str
         print_error(f"Secret '{secret_name}' not found")
 
 
-def test_deployment(region: str) -> None:
+def test_deployment(region: str, custom_name: str) -> None:
     """Test the Lambda function"""
     print_info("Testing Lambda function...")
     
-    lambda_function_name = "quip-sync-function"
+    lambda_function_name = f"quip-sync-{custom_name}-function"
     region_flag = f"--region {region}" if region else ""
     
     try:
@@ -394,14 +474,16 @@ def main() -> None:
     
     # Collect parameters
     cdk_params = collect_cdk_parameters(aws_info['region'])
-    secrets = collect_secrets()
+    secrets = collect_secrets(cdk_params['custom_name'])
     
     # Confirmation
     print()
     print_info("Deployment Summary:")
+    print(f"  Custom Name: {cdk_params['custom_name']}")
     print(f"  Stack Name: {cdk_params['stack_name']}")
     print(f"  AWS Account: {aws_info['account_id']}")
     print(f"  AWS Region: {cdk_params['aws_region']}")
+    print(f"  S3 Bucket Name: {aws_info['account_id']}-quip-sync-{cdk_params['custom_name']}")
     print(f"  Secret Name: {secrets['secret_name']}")
     
     print(f"  QuickSight Principal: {cdk_params['quicksight_principal_id']}")
@@ -426,6 +508,7 @@ def main() -> None:
             secrets['secret_name'], 
             aws_info,
             cdk_params['aws_region'], 
+            cdk_params['custom_name'],
             cdk_params['service_role_arn']
         )
         
@@ -436,7 +519,7 @@ def main() -> None:
         print()
         test_choice = prompt_input("Do you want to test the Lambda function? (y/n)", default="n")
         if test_choice.lower() in ['y', 'yes']:
-            test_deployment(cdk_params['aws_region'])
+            test_deployment(cdk_params['aws_region'], cdk_params['custom_name'])
         
         print()
         print_success("All done! Your Quip-S3 sync system is ready.")

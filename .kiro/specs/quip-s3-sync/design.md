@@ -74,6 +74,9 @@ def lambda_handler(event: dict, context: LambdaContext) -> dict:
 **Interface**:
 ```python
 class SecretsClient:
+    def __init__(self, secret_name: str):
+        """Initialize with configurable secret name"""
+        
     def get_quip_credentials(self) -> tuple[str, list[str]]:
         """
         Retrieve Quip access token and folder IDs
@@ -271,12 +274,14 @@ class SecretsManagerError(QuipSyncError):
 ```python
 class QuipSyncStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, 
+                 custom_name: str,
                  quicksight_principal_id: str = None, **kwargs):
-        # S3 Bucket with name format: <AWS Account ID>-quip-sync
+        # CloudFormation stack name format: QuipSyncStack-<custom_name>
+        # S3 Bucket with name format: <AWS Account ID>-quip-sync-<custom_name>
+        # Secrets Manager secret with name format: quip-sync-<custom_name>-credentials
         # Bucket policy with configurable QuickSightDataSourceCreatorPrincipalId
         # Lambda Function with Python 3.13 runtime
         # EventBridge Rule with Sydney timezone schedule
-        # Secrets Manager secret
         # IAM roles and policies
         # CloudWatch log groups
 ```
@@ -286,7 +291,9 @@ class QuipSyncStack(Stack):
 - **Runtime**: Python 3.13
 - **Memory**: 1024 MB
 - **Timeout**: 15 minutes
-- **Environment Variables**: S3_BUCKET_NAME, SECRET_NAME
+- **Environment Variables**: 
+  - S3_BUCKET_NAME: `<AWS-Account-ID>-quip-sync-<custom-name>`
+  - SECRET_NAME: `quip-sync-<custom-name>-credentials`
 - **VPC**: No VPC (public internet access required for Quip API)
 
 ### EventBridge Schedule
@@ -334,8 +341,8 @@ service_role_arn = "arn:aws:iam::123456789012:role/service-role/aws-quicksight-s
                 "s3:ListBucketVersions"
             ],
             "Resource": [
-                "arn:aws:s3:::${aws-account-id}-quip-sync",
-                "arn:aws:s3:::${aws-account-id}-quip-sync/*"
+                "arn:aws:s3:::${aws-account-id}-quip-sync-${custom-name}",
+                "arn:aws:s3:::${aws-account-id}-quip-sync-${custom-name}/*"
             ],
             "Condition": {
                 "StringEquals": {
@@ -350,7 +357,7 @@ service_role_arn = "arn:aws:iam::123456789012:role/service-role/aws-quicksight-s
 
 **CDK Deployment Command**:
 ```bash
-cdk deploy --parameters quicksightPrincipalId="user/..." --parameters quicksightNamespace="default"
+cdk deploy QuipSyncStack-my-sync --parameters customName="my-sync" --parameters quicksightPrincipalId="user/..." --parameters quicksightNamespace="default"
 ```
 
 ## Security Considerations
@@ -402,13 +409,14 @@ cdk deploy --parameters quicksightPrincipalId="user/..." --parameters quicksight
 ### CDK Deployment
 
 1. **Bootstrap**: CDK bootstrap in target AWS account/region
-2. **Deploy**: `cdk deploy` with Quick Suite parameters and AWS credentials
+2. **Deploy**: `cdk deploy` with custom stack name and parameters
    ```bash
-   cdk deploy --parameters quicksightPrincipalId="user/..." \
+   cdk deploy QuipSyncStack-my-sync --parameters customName="my-sync" \
+              --parameters quicksightPrincipalId="user/..." \
               --parameters quicksightNamespace="default" \
               --parameters serviceRoleArn="arn:aws:iam::account:role/..."
    ```
-3. **Configuration**: Manual setup of Secrets Manager values
+3. **Configuration**: Manual setup of Secrets Manager values in the created secret
 4. **Testing**: Execute Lambda function manually to verify setup
 
 ### Environment Management

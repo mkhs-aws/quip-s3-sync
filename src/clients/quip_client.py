@@ -469,8 +469,11 @@ class QuipClient(QuipClientInterface):
                     # 1. Full objects with id, type, title, etc. (for folders)
                     # 2. Simple objects with just thread_id (for threads)
                     
-                    child_id = child.get('id') or child.get('thread_id')
-                    child_type = child.get('type')
+                    child_id = child.get('folder_id') or child.get('id') or child.get('thread_id')
+                    if 'folder_id' in child.keys():
+                        child_type = 'FOLDER'
+                    else:
+                        child_type = child.get('type')
                     child_title = child.get('title', 'No Title')
                     
                     # Skip children with missing essential fields
@@ -487,7 +490,7 @@ class QuipClient(QuipClientInterface):
                     else:
                         logger.debug(f"Processing child: id={child_id}, type={child_type}, title={child_title}")
                     
-                    if child_type == 'folder':
+                    if child_type == 'FOLDER':
                         # Add subfolder to processing queue
                         if child_id not in visited_folders:
                             folders_to_process.append(child_id)

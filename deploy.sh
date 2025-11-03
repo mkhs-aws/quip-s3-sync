@@ -135,11 +135,81 @@ bootstrap_cdk() {
     fi
 }
 
+# Function to validate custom name
+validate_custom_name() {
+    local custom_name="$1"
+    
+    if [ -z "$custom_name" ]; then
+        echo "custom_name cannot be empty"
+        return 1
+    fi
+    
+    # Check length (3-40 characters)
+    # Account for bucket name format: <account-id>-quip-sync-<custom-name>
+    # AWS account ID is 12 digits, "quip-sync" is 9 chars, hyphens are 2 chars
+    # So we need: 12 + 1 + 9 + 1 + custom_name <= 63
+    # Therefore: custom_name <= 63 - 23 = 40 characters
+    max_custom_name_length=40
+    
+    if [ ${#custom_name} -lt 3 ] || [ ${#custom_name} -gt $max_custom_name_length ]; then
+        echo "custom_name must be between 3 and $max_custom_name_length characters long"
+        return 1
+    fi
+    
+    # Check for valid characters (lowercase letters, numbers, hyphens only)
+    if [[ ! "$custom_name" =~ ^[a-z0-9-]+$ ]]; then
+        echo "custom_name can only contain lowercase letters, numbers, and hyphens"
+        return 1
+    fi
+    
+    # Must start and end with letter or number
+    if [[ ! "$custom_name" =~ ^[a-z0-9] ]] || [[ ! "$custom_name" =~ [a-z0-9]$ ]]; then
+        echo "custom_name must start and end with a letter or number"
+        return 1
+    fi
+    
+    # Cannot contain consecutive hyphens
+    if [[ "$custom_name" == *"--"* ]]; then
+        echo "custom_name cannot contain consecutive hyphens"
+        return 1
+    fi
+    
+    # Cannot be formatted as IP address (basic check)
+    if [[ "$custom_name" =~ ^[0-9]{1,3}-[0-9]{1,3}-[0-9]{1,3}-[0-9]{1,3}$ ]]; then
+        echo "custom_name cannot be formatted as an IP address"
+        return 1
+    fi
+    
+    # Additional AWS reserved names check
+    if [[ "$custom_name" == *"aws"* ]] || [[ "$custom_name" == *"amazon"* ]] || [[ "$custom_name" == *"amzn"* ]]; then
+        echo "custom_name cannot contain AWS reserved words (aws, amazon, amzn)"
+        return 1
+    fi
+    
+    return 0
+}
+
 # Function to collect CDK parameters
 collect_cdk_parameters() {
     print_info "Collecting CDK deployment parameters..."
     echo
     
+    print_info "Deployment Configuration:"
+    
+    # Prompt for custom name with validation
+    while true; do
+        prompt_input "Knowledge base name e.g. accounts (lower case with hyphens only - will be used for all AWS resource names)" "CUSTOM_NAME" "true"
+        
+        if validation_error=$(validate_custom_name "$CUSTOM_NAME"); then
+            print_success "Custom name '$CUSTOM_NAME' is valid"
+            break
+        else
+            print_error "Invalid custom name: $validation_error"
+            print_info "Please try again with a different name"
+        fi
+    done
+    
+    echo
     print_info "AWS Configuration:"
     prompt_input "AWS Region for deployment" "AWS_DEPLOY_REGION" "false" "$AWS_REGION"
     
@@ -149,9 +219,8 @@ collect_cdk_parameters() {
     prompt_input "QuickSight Namespace" "QUICKSIGHT_NAMESPACE" "false" "default"
     prompt_input "QuickSight Service Role ARN (e.g., arn:aws:iam::123456789012:role/service-role/aws-quicksight-service-role-v0)" "SERVICE_ROLE_ARN" "true"
     
-    echo
-    print_info "Stack Configuration:"
-    prompt_input "Stack Name" "STACK_NAME" "false" "QuipSyncStack"
+    # Stack name is automatically generated from custom name
+    STACK_NAME="QuipSyncStack-$CUSTOM_NAME"
 }
 
 # Function to collect secrets
@@ -159,11 +228,14 @@ collect_secrets() {
     print_info "Collecting Secrets Manager configuration..."
     echo
     
+    # Generate secret name using the same format as CDK stack
+    SECRET_NAME="quip-sync-$CUSTOM_NAME-credentials"
+    
     prompt_input "Quip Access Token (Bearer token)" "QUIP_ACCESS_TOKEN" "true"
     echo
     prompt_input "Quip Folder IDs (comma-separated)" "FOLDER_IDS" "true"
     
-    prompt_input "Secret Name" "SECRET_NAME" "false" "quip-sync-credentials"
+    print_info "Secret will be created/updated with name: $SECRET_NAME"
 }
 
 # Function to run CDK deployment
@@ -175,19 +247,22 @@ deploy_cdk() {
         export AWS_DEFAULT_REGION="$AWS_DEPLOY_REGION"
     fi
     
-    # Build CDK parameters
+    # Build CDK context parameters
     CDK_PARAMS=""
     
+    # Add custom name (required)
+    CDK_PARAMS="$CDK_PARAMS --context customName=\"$CUSTOM_NAME\""
+    
     if [ -n "$QUICKSIGHT_PRINCIPAL_ID" ]; then
-        CDK_PARAMS="$CDK_PARAMS --parameters quicksightPrincipalId=\"$QUICKSIGHT_PRINCIPAL_ID\""
+        CDK_PARAMS="$CDK_PARAMS --context quicksightPrincipalId=\"$QUICKSIGHT_PRINCIPAL_ID\""
     fi
     
     if [ -n "$QUICKSIGHT_NAMESPACE" ]; then
-        CDK_PARAMS="$CDK_PARAMS --parameters quicksightNamespace=\"$QUICKSIGHT_NAMESPACE\""
+        CDK_PARAMS="$CDK_PARAMS --context quicksightNamespace=\"$QUICKSIGHT_NAMESPACE\""
     fi
     
     if [ -n "$SERVICE_ROLE_ARN" ]; then
-        CDK_PARAMS="$CDK_PARAMS --parameters serviceRoleArn=\"$SERVICE_ROLE_ARN\""
+        CDK_PARAMS="$CDK_PARAMS --context serviceRoleArn=\"$SERVICE_ROLE_ARN\""
     fi
     
     # Show what will be deployed
@@ -270,7 +345,7 @@ verify_deployment() {
         
         # Check if bucket policy exists (if QuickSight parameters were provided)
         if [ -n "$SERVICE_ROLE_ARN" ]; then
-            BUCKET_NAME_ACTUAL="$AWS_ACCOUNT_ID-quip-sync"
+            BUCKET_NAME_ACTUAL="$AWS_ACCOUNT_ID-quip-sync-$CUSTOM_NAME"
             REGION_FLAG=""
             if [ -n "$AWS_DEPLOY_REGION" ]; then
                 REGION_FLAG="--region $AWS_DEPLOY_REGION"
@@ -303,7 +378,7 @@ verify_deployment() {
 test_deployment() {
     print_info "Testing Lambda function..."
     
-    LAMBDA_FUNCTION_NAME="quip-sync-function"
+    LAMBDA_FUNCTION_NAME="quip-sync-$CUSTOM_NAME-function"
     
     # Test invoke the Lambda function
     print_info "Invoking Lambda function for test..."
@@ -358,9 +433,11 @@ main() {
     # Confirmation
     echo
     print_info "Deployment Summary:"
+    echo "  Custom Name: $CUSTOM_NAME"
     echo "  Stack Name: $STACK_NAME"
     echo "  AWS Account: $AWS_ACCOUNT_ID"
     echo "  AWS Region: $AWS_DEPLOY_REGION"
+    echo "  S3 Bucket Name: $AWS_ACCOUNT_ID-quip-sync-$CUSTOM_NAME"
     echo "  Secret Name: $SECRET_NAME"
     
     echo "  QuickSight Principal: $QUICKSIGHT_PRINCIPAL_ID"

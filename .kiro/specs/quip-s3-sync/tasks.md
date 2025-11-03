@@ -77,3 +77,31 @@
   - Create deployment documentation with parameter examples for Quick Suite configuration
   - Add README with setup instructions, deployment commands, and Secrets Manager configuration
   - _Requirements: 8.1, 8.2, 8.3, 8.4_
+
+- [x] 11. Add configurable naming support to CDK stack
+  - Modify QuipSyncStack to accept a custom_name parameter for configurable resource naming
+  - Update S3 bucket creation to use format `<AWS-Account-ID>-<custom-name>` instead of hardcoded suffix
+  - Update Secrets Manager secret creation to use format `<AWS-Account-ID>-<custom-name>`
+  - Add parameter validation to ensure custom_name follows AWS naming conventions
+  - _Requirements: 11.1, 11.2, 11.3, 11.5_
+
+- [x] 12. Update Lambda function to use configurable names
+  - Modify Lambda environment variables to pass both S3_BUCKET_NAME and SECRET_NAME
+  - Update SecretsClient initialization to accept secret_name parameter from environment variable
+  - Update S3Client initialization to use bucket_name from environment variable
+  - Ensure Lambda handler reads environment variables and passes them to client constructors
+  - _Requirements: 11.4_
+
+- [x] 13. Update deployment script to prompt for custom name
+  - Modify CDK app deployment to prompt user for custom name during deployment
+  - Add validation logic to ensure the provided name meets AWS naming requirements
+  - Update deployment documentation with examples of the new parameter usage
+  - Test deployment with different custom names to verify naming consistency
+  - _Requirements: 11.1, 11.5_
+
+- [x] 14. Update CDK app to use custom stack names
+  - Modify CDK app instantiation to create stack names in format `QuipSyncStack-<custom-name>`
+  - Update deployment script to use the custom stack name when calling `cdk deploy`
+  - Ensure stack name validation follows CloudFormation naming conventions
+  - Update all deployment commands and documentation to reference the new stack naming pattern
+  - _Requirements: 11.2_
