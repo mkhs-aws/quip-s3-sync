@@ -15,13 +15,17 @@ quicksight_principal_id = app.node.try_get_context("quicksightPrincipalId")
 quicksight_namespace = app.node.try_get_context("quicksightNamespace") or "default"
 service_role_arn = app.node.try_get_context("serviceRoleArn")
 
-# Validate that custom_name is provided
+# Use a default custom_name for template synthesis if not provided
+# This allows 'cdk synth' to work without parameters for generating the template
 if not custom_name:
-    raise ValueError(
-        "customName context parameter is required.\n"
-        "Use: cdk deploy --context customName=your-name\n"
-        "Or use the deployment script: python deploy.py"
-    )
+    custom_name = "default"
+    import sys
+    if "synth" not in sys.argv and "deploy" in sys.argv:
+        raise ValueError(
+            "customName context parameter is required.\n"
+            "Use: cdk deploy --context customName=your-name\n"
+            "Or use the deployment script: python deploy.py"
+        )
 
 # Create stack name in format QuipSyncStack-<custom-name>
 stack_name = f"QuipSyncStack-{custom_name}"

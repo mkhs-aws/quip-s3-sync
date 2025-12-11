@@ -12,6 +12,7 @@ from aws_cdk import (
     Fn,
     Tags,
     BundlingOptions,
+    SecretValue,
     aws_lambda as _lambda,
     aws_s3 as s3,
     aws_events as events,
@@ -55,6 +56,14 @@ class QuipSyncStack(Stack):
         """
         super().__init__(scope, construct_id, **kwargs)
         
+        # Create CDK parameter for custom name
+        self.custom_name_param = CfnParameter(
+            self, "customName",
+            type="String",
+            description="Custom name for resource naming (3-40 characters, lowercase letters, numbers, and hyphens)",
+            default=custom_name or "default"
+        )
+        
         # Validate custom_name follows AWS naming conventions
         self.custom_name = self._validate_custom_name(custom_name)
         
@@ -78,6 +87,22 @@ class QuipSyncStack(Stack):
             type="String", 
             description="QuickSight service role ARN for S3 access",
             default=service_role_arn or ""
+        )
+        
+        # Create CDK parameters for Quip credentials
+        self.quip_access_token_param = CfnParameter(
+            self, "quipAccessToken",
+            type="String",
+            description="Quip access token for API authentication",
+            no_echo=True,
+            default=""
+        )
+        
+        self.quip_folder_ids_param = CfnParameter(
+            self, "quipFolderIds",
+            type="String",
+            description="Comma-separated list of Quip folder IDs to synchronize",
+            default=""
         )
         
         # Create S3 bucket with dynamic name format: <AWS Account ID>-quip-sync
@@ -254,15 +279,18 @@ class QuipSyncStack(Stack):
         """
         secret_name = f"quip-sync-{self.custom_name}-credentials"
         
+        # Build the secret string from parameters
+        secret_dict = {
+            "quip_access_token": self.quip_access_token_param.value_as_string,
+            "folder_ids": self.quip_folder_ids_param.value_as_string
+        }
+        secret_string = json.dumps(secret_dict)
+        
         secret = secretsmanager.Secret(
             self, "QuipCredentials",
             secret_name=secret_name,
             description=f"Quip access token and folder IDs for synchronization ({self.custom_name})",
-            generate_secret_string=secretsmanager.SecretStringGenerator(
-                secret_string_template='{"quip_access_token": "", "folder_ids": ""}',
-                generate_string_key="placeholder",
-                exclude_characters=" %+~`#$&*()|[]{}:;<>?!'/\"\\@"
-            )
+            secret_string_value=SecretValue.unsafe_plain_text(secret_string)
         )
         
         # Add tags for IAM policy conditions and resource identification
@@ -327,6 +355,17 @@ class QuipSyncStack(Stack):
                         )
                     ]
                 ),
+                "QuipSyncLambdaCodeS3Policy": iam.PolicyDocument(
+                    statements=[
+                        # S3 permissions for Lambda code bucket - read-only access
+                        iam.PolicyStatement(
+                            sid="AllowGetLambdaCode",
+                            effect=iam.Effect.ALLOW,
+                            actions=["s3:GetObject"],
+                            resources=[f"arn:aws:s3:::{self.account}-quip-s3-sync-lambda/quip-sync-lambda.zip"]
+                        )
+                    ]
+                ),
                 "QuipSyncCloudWatchLogsPolicy": iam.PolicyDocument(
                     statements=[
                         # CloudWatch Logs permissions - scoped to specific log group
@@ -358,20 +397,20 @@ class QuipSyncStack(Stack):
         )
         
         # Create Lambda function
+        # Lambda code is stored in S3 bucket: <account-id>-quip-s3-sync-lambda
+        lambda_code_bucket_name = f"{self.account}-quip-s3-sync-lambda"
+        
         lambda_function = _lambda.Function(
             self, "QuipSyncFunction",
             function_name=f"quip-sync-{self.custom_name}-function",
             runtime=_lambda.Runtime.PYTHON_3_13,
             handler="lambda_function.lambda_handler",
-            code=_lambda.Code.from_asset(
-                "src",
-                bundling=BundlingOptions(
-                    image=_lambda.Runtime.PYTHON_3_13.bundling_image,
-                    command=[
-                        "bash", "-c",
-                        "pip install -r requirements.txt -t /asset-output && cp -au . /asset-output"
-                    ]
-                )
+            code=_lambda.Code.from_bucket(
+                bucket=s3.Bucket.from_bucket_name(
+                    self, "LambdaCodeBucket",
+                    bucket_name=lambda_code_bucket_name
+                ),
+                key="quip-sync-lambda.zip"
             ),
             memory_size=1024,
             timeout=Duration.minutes(15),

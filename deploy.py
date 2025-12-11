@@ -139,7 +139,7 @@ def check_cdk() -> None:
         sys.exit(1)
 
 
-def bootstrap_cdk(region: str) -> None:
+def bootstrap_cdk(region: str, account_id: str) -> None:
     """Bootstrap CDK if needed"""
     print_info("Checking if CDK bootstrap is required...")
     
@@ -151,15 +151,56 @@ def bootstrap_cdk(region: str) -> None:
         print_success("CDK already bootstrapped")
     except subprocess.CalledProcessError:
         print_warning("CDK bootstrap required")
-        choice = prompt_input("Do you want to bootstrap CDK now? (y/n)", default="y")
+        print_info("Note: If your account has CloudFormation hooks enabled, bootstrap may fail.")
+        print_info("You can skip bootstrap now and manually bootstrap later if needed.")
+        choice = prompt_input("Do you want to bootstrap CDK now? (y/n/skip)", default="skip")
         
-        if choice.lower() in ['y', 'yes']:
+        if choice.lower() == 'skip':
+            print_warning("Skipping CDK bootstrap. Make sure to bootstrap manually if deployment fails.")
+            print_info("To bootstrap manually, run: cdk bootstrap aws://{account_id}/{region}")
+            return
+        elif choice.lower() in ['y', 'yes']:
             print_info("Bootstrapping CDK...")
-            bootstrap_cmd = f"cdk bootstrap"
+            # Bootstrap with explicit environment to avoid loading app.py
+            # Use --app flag to prevent CDK from loading our app.py
+            import os
+            env = os.environ.copy()
             if region:
-                bootstrap_cmd = f"AWS_DEFAULT_REGION={region} {bootstrap_cmd}"
-            run_command(bootstrap_cmd)
-            print_success("CDK bootstrap completed")
+                env['AWS_DEFAULT_REGION'] = region
+                # Use a dummy app to prevent loading app.py which requires customName
+                # Add --execute to bypass changeset and execute directly (avoids hooks)
+                bootstrap_cmd = f"cdk bootstrap aws://{account_id}/{region} --app 'echo {{}}' --execute"
+            else:
+                bootstrap_cmd = "cdk bootstrap --app 'echo {}' --execute"
+            
+            # Run with modified environment
+            try:
+                result = subprocess.run(
+                    bootstrap_cmd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    check=True
+                )
+                print_success("CDK bootstrap completed")
+            except subprocess.CalledProcessError as e:
+                print_error(f"Command failed: {bootstrap_cmd}")
+                print_error(f"Error output: {e.stderr}")
+                if e.stdout:
+                    print_error(f"Standard output: {e.stdout}")
+                print()
+                print_warning("Bootstrap failed! This is likely due to CloudFormation hooks in your AWS account.")
+                print_info("You have two options:")
+                print_info("1. Contact your AWS administrator to temporarily disable the CloudFormation hook")
+                print_info("2. Skip bootstrap and try deployment anyway (it may work if bootstrap was done previously)")
+                print()
+                skip_choice = prompt_input("Do you want to skip bootstrap and continue? (y/n)", default="y")
+                if skip_choice.lower() in ['y', 'yes']:
+                    print_warning("Continuing without bootstrap. Deployment may fail if bootstrap is required.")
+                    return
+                else:
+                    raise
         else:
             print_error("CDK bootstrap is required for deployment. Exiting.")
             sys.exit(1)
@@ -466,7 +507,7 @@ def main() -> None:
     # Pre-flight checks
     aws_info = check_aws_cli()
     check_cdk()
-    bootstrap_cdk(aws_info['region'])
+    bootstrap_cdk(aws_info['region'], aws_info['account_id'])
     
     print()
     print_info("Starting interactive deployment configuration...")
